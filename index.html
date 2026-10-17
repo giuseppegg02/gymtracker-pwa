@@ -21,6 +21,7 @@ main{padding:12px 14px 80px;max-width:640px;margin:0 auto}
 .btn.s{min-height:36px;padding:4px 10px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 10px}
 .card.hl{border-color:var(--ac);border-width:2px}
+.card.last{border-left:4px solid var(--ac)}
 .mu{color:var(--mu);font-size:13px}
 .sec{color:var(--mu);font-weight:600;font-size:14px;margin:18px 0 8px}
 .row{display:flex;gap:8px;align-items:center}
@@ -37,6 +38,21 @@ main{padding:12px 14px 80px;max-width:640px;margin:0 auto}
 summary{cursor:pointer;color:var(--mu);font-size:13px;margin-top:10px}
 details .mu{margin-top:6px;font-size:13.5px}
 #t{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#000d;color:#fff;padding:10px 16px;border-radius:20px;display:none;z-index:9;max-width:90%}
+.chart{position:relative;height:210px;margin-top:8px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px;margin-top:10px}
+.kpi{background:var(--in);border:1px solid var(--line);border-radius:10px;padding:8px 6px;text-align:center}
+.kpi b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+.kpi span{font-size:11px;color:var(--mu)}
+.delta{font-weight:700}
+.up{color:#1B6B45}.down{color:#B3261E}
+@media(prefers-color-scheme:dark){.up{color:#5CD6A0}.down{color:#FF8A80}}
+.seg{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.btn.on{border-color:var(--ac);color:var(--ac)}
+select#exsel{width:100%;min-height:44px;margin-top:8px;border-radius:8px;border:1px solid var(--line);background:var(--in);color:var(--tx);font:inherit;padding:0 10px}
+.lst{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px;font-variant-numeric:tabular-nums}
+.lst:last-child{border-bottom:0}
+.lst span:last-child{color:var(--mu);text-align:right}
+.ex-h{font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -44,174 +60,8 @@ details .mu{margin-top:6px;font-size:13.5px}
 <main id="app"></main>
 <div id="t"></div>
 <input type="file" id="f" hidden>
-<script>
-const $=s=>document.querySelector(s),app=$('#app'),hd=$('#hd');
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const toast=m=>{const t=$('#t');t.textContent=m;t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display='none',2600)};
-const L=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
-const S=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{toast('Salvataggio non riuscito: spazio o permessi del browser')}};
-const dropDraft=()=>{draft=null;localStorage.removeItem('gt_draft')};
-const fmtD=iso=>new Date(iso).toLocaleDateString('it-IT',{day:'numeric',month:'short',year:'2-digit'});
-const setT=s=>(s.kg||'BW')+'×'+s.reps;
-const back='<button class="btn g" data-act="back" aria-label="Indietro">←</button>';
-let sc,raw,log=L('gt_log',[]),draft=L('gt_draft',null),tick,deferred;
-
-/* ---- scheda: struttura del file .jsx (sessioni con sections/exercises + scienza) ---- */
-function normalize(r){
-  const sessions=Object.entries(r).filter(([,v])=>v&&Array.isArray(v.sections)).map(([id,s])=>({
-    id,label:s.label||id,focus:s.focus||'',note:s.note||'',
-    sections:s.sections.map(sec=>({title:sec.title||'',exercises:sec.exercises.flatMap(ex=>{
-      const names=String(ex.name).split(' + ').map(x=>x.trim());
-      const sets=parseInt((ex.detail||'').match(/^(\d+)\s*×/)?.[1])||3;
-      return names.map(n=>({name:n,sets,detail:ex.detail||'',desc:ex.desc||'',badge:ex.badge||'',color:ex.color||'',
-        ss:names.length>1?names.filter(x=>x!==n).join(' + '):''}));
-    })}))
-  }));
-  if(!sessions.length)throw Error('nessuna sessione trovata nel file');
-  return{sessions,sci:Array.isArray(r.scienza)?r.scienza:[]};
-}
-const prev=n=>{const w=log.find(w=>w.sets[n]);return w?w.sets[n]:null};
-const rows=ex=>draft.sets[ex.name]||(draft.sets[ex.name]=Array.from({length:ex.sets},()=>({kg:'',reps:'',ok:false})));
-
-/* ---- viste ---- */
-function home(){
-  hd.innerHTML='<h1>GymTracker</h1><button class="btn g" data-go="#/menu" aria-label="Impostazioni">☰</button>';
-  let h='';
-  if(draft){const s=sc.sessions.find(s=>s.id===draft.sid);
-    h+=`<div class="card hl"><b>Allenamento in corso</b><div class="mu">${esc(s?s.label:draft.sid)}</div><div class="row" style="margin-top:10px"><button class="btn" data-go="#/w/${encodeURIComponent(draft.sid)}">Riprendi</button><button class="btn g" data-act="drop">Scarta</button></div></div>`}
-  for(const s of sc.sessions){const n=log.filter(w=>w.sid===s.id),l=n[0];
-    h+=`<div class="card"><b style="font-size:17px">${esc(s.label)}</b><div class="mu">${esc(s.focus)}</div><div class="mu" style="margin:8px 0">${l?'Ultima volta il '+fmtD(l.date)+' ('+n.length+(n.length===1?' seduta':' sedute')+')':'Non ancora eseguita'}</div><button class="btn" data-act="start" data-sid="${esc(s.id)}">Inizia ${esc(s.label)}</button></div>`}
-  h+='<button class="btn g" style="width:100%" data-go="#/sci">Note scientifiche della scheda</button>';
-  app.innerHTML=h;
-}
-function workout(sid){
-  const s=sc.sessions.find(x=>x.id===sid);
-  if(!s||!draft||draft.sid!==sid)return location.replace('#/');
-  hd.innerHTML=`${back}<h1>${esc(s.label)} <span class="mu" id="clk"></span></h1><button class="btn" data-act="finish">Termina</button>`;
-  let h='';
-  for(const sec of s.sections){
-    h+=`<div class="sec">${esc(sec.title)}</div>`;
-    for(const ex of sec.exercises){
-      const r=rows(ex),p=prev(ex.name);
-      h+=`<div class="card"><div class="row"><b style="flex:1">${esc(ex.name)}</b><span class="bd b-${esc(ex.color)}">${esc(ex.badge)}</span><button class="btn g s" data-go="#/h/${encodeURIComponent(ex.name)}" aria-label="Storico">📈</button></div>
-<div class="mu">${esc(ex.detail)}</div>${ex.ss?`<div class="mu">Superset con ${esc(ex.ss)}</div>`:''}${p?`<div class="mu">Ultima volta: ${p.map(setT).join('  ')}</div>`:''}
-${r.map((x,i)=>{const q=p&&(p[i]||p[p.length-1])||{};
-return `<div class="set${x.ok?' ok':''}" data-ex="${esc(ex.name)}" data-i="${i}"><span class="mu">${i+1}</span><input inputmode="decimal" data-f="kg" aria-label="kg" placeholder="${esc(q.kg??'kg')}" value="${esc(x.kg)}"><input inputmode="numeric" data-f="reps" aria-label="ripetizioni" placeholder="${esc(q.reps??'rip')}" value="${esc(x.reps)}"><button class="ck" data-act="ck" aria-label="Fatta">✓</button></div>`}).join('')}
-<div class="row" style="margin-top:10px"><button class="btn g s" data-act="add" data-ex="${esc(ex.name)}">+ serie</button><button class="btn g s" data-act="del" data-ex="${esc(ex.name)}">− serie</button></div>
-<details><summary>Descrizione tecnica</summary><div class="mu">${esc(ex.desc)}</div></details></div>`;
-    }
-  }
-  app.innerHTML=h;clock();
-}
-function clock(){
-  clearInterval(tick);
-  const f=()=>{const e=$('#clk');if(!e||!draft)return clearInterval(tick);e.textContent=Math.floor((Date.now()-draft.start)/60000)+' min'};
-  f();tick=setInterval(f,15000);
-}
-function hist(name){
-  hd.innerHTML=`${back}<h1>${esc(name)}</h1>`;
-  const w=log.filter(x=>x.sets[name]);
-  if(!w.length){app.innerHTML='<p class="mu">Nessun dato registrato per questo esercizio.</p>';return}
-  const t=w.map(x=>Math.max(...x.sets[name].map(s=>s.kg))).reverse().slice(-30);
-  const mx=Math.max(...t),mn=Math.min(...t),W=300,H=90;
-  const px=i=>t.length>1?8+i*(W-16)/(t.length-1):W/2,py=v=>mx===mn?H/2:H-8-(v-mn)*(H-16)/(mx-mn);
-  const svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%"><polyline fill="none" stroke="var(--ac)" stroke-width="2" points="${t.map((v,i)=>px(i)+','+py(v)).join(' ')}"/>${t.map((v,i)=>`<circle cx="${px(i)}" cy="${py(v)}" r="3.5" fill="var(--ac)"/>`).join('')}</svg>`;
-  app.innerHTML=`<div class="card">${svg}<div class="mu">Carico massimo per seduta: da ${mn} a ${mx} kg (${w.length} ${w.length===1?'seduta':'sedute'})</div></div>`+
-    w.map(x=>`<div class="card"><b>${fmtD(x.date)}</b> <span class="mu">${esc(x.label)}</span><div style="margin-top:4px;font-variant-numeric:tabular-nums">${x.sets[name].map(setT).join('  ')}</div></div>`).join('');
-}
-function sci(){
-  hd.innerHTML=`${back}<h1>Note scientifiche</h1>`;
-  app.innerHTML=sc.sci.length?sc.sci.map(s=>`<div class="card"><b>${esc(s.title)}</b><div class="mu" style="font-size:14px;margin-top:6px">${esc(s.body)}</div></div>`).join(''):'<p class="mu">Questa scheda non contiene note.</p>';
-}
-async function menu(){
-  hd.innerHTML=`${back}<h1>Impostazioni</h1>`;
-  const p=navigator.storage&&navigator.storage.persisted?await navigator.storage.persisted():null;
-  app.innerHTML=`<div class="card"><b>Dati</b><div class="mu">${log.length} allenamenti salvati su questo dispositivo, nel browser di questo indirizzo. Archiviazione protetta dalla pulizia automatica: ${p===null?'non disponibile':p?'sì':'no'}. Esporta un backup ogni tanto.</div><div class="col"><button class="btn" data-act="exp">Esporta backup</button><button class="btn g" data-act="imp">Ripristina backup</button></div></div>
-<div class="card"><b>Scheda</b><div class="mu">Importa un file .json o .jsx con la stessa struttura di quella attuale. Lo storico è legato al nome dell'esercizio.</div><div class="col"><button class="btn g" data-act="sch">Importa scheda</button><button class="btn g" data-act="def">Torna alla scheda originale</button></div></div>${deferred?'<button class="btn" style="width:100%" data-act="inst">Installa app</button>':''}`;
-}
-
-/* ---- azioni ---- */
-function start(sid){
-  if(draft&&draft.sid!==sid&&!confirm('Hai un allenamento in corso. Scartarlo e iniziare questa sessione?'))return;
-  if(!draft||draft.sid!==sid){draft={sid,start:Date.now(),sets:{}};S('gt_draft',draft)}
-  location.hash='#/w/'+encodeURIComponent(sid);
-}
-function finish(){
-  const sets={};let n=0;
-  for(const [k,v] of Object.entries(draft.sets)){
-    const a=v.map(x=>({kg:parseFloat(String(x.kg).replace(',','.'))||0,reps:parseInt(x.reps)||0})).filter(x=>x.reps>0);
-    if(a.length){sets[k]=a;n+=a.length}
-  }
-  if(!n){if(confirm("Nessuna serie registrata. Scartare l'allenamento?")){dropDraft();location.replace('#/')}return}
-  if(!confirm('Salvare '+n+' serie?'))return;
-  const s=sc.sessions.find(x=>x.id===draft.sid);
-  log.unshift({id:Date.now(),sid:draft.sid,label:s?s.label:draft.sid,date:new Date().toISOString(),min:Math.round((Date.now()-draft.start)/60000),sets});
-  S('gt_log',log);dropDraft();toast('Allenamento salvato');location.replace('#/');
-}
-const row=el=>{const d=el.closest&&el.closest('.set');return d&&{d,x:draft.sets[d.dataset.ex][+d.dataset.i],k:d.querySelector('[data-f=kg]'),r:d.querySelector('[data-f=reps]')}};
-function pick(acc,fn){const f=$('#f');f.accept=acc;f.onchange=async()=>{const file=f.files[0];f.value='';if(file)try{await fn(await file.text())}catch(e){alert('Errore: '+e.message)}};f.click()}
-function exp(){
-  const b=new Blob([JSON.stringify({v:1,raw,log})],{type:'application/json'}),a=document.createElement('a');
-  a.href=URL.createObjectURL(b);a.download='gymtracker-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),1e4);
-}
-document.addEventListener('click',e=>{
-  const g=e.target.closest('[data-go]');if(g){location.hash=g.dataset.go;return}
-  const a=e.target.closest('[data-act]');if(!a)return;const d=a.dataset;
-  const redraw=()=>{const y=scrollY;workout(draft.sid);scrollTo(0,y)};
-  switch(d.act){
-    case'back':history.length>1?history.back():location.replace('#/');break;
-    case'start':start(d.sid);break;
-    case'drop':if(confirm('Scartare l\'allenamento in corso?')){dropDraft();home()}break;
-    case'finish':finish();break;
-    case'ck':{const{d:el,x,k,r}=row(a);x.ok=!x.ok;
-      if(x.ok)for(const[f,i]of[['kg',k],['reps',r]])if(i.value===''&&i.placeholder!==''&&!isNaN(i.placeholder)){i.value=i.placeholder;x[f]=i.value}
-      el.classList.toggle('ok',x.ok);S('gt_draft',draft);break}
-    case'add':draft.sets[d.ex].push({kg:'',reps:'',ok:false});S('gt_draft',draft);redraw();break;
-    case'del':if(draft.sets[d.ex].length>1){draft.sets[d.ex].pop();S('gt_draft',draft);redraw()}break;
-    case'exp':exp();break;
-    case'imp':pick('.json',t=>{
-      const b=JSON.parse(t);if(!Array.isArray(b.log))throw Error('non è un backup di GymTracker');
-      const l=b.log.filter(w=>w&&w.sets&&w.date).sort((x,y)=>String(y.date).localeCompare(String(x.date)));
-      const n=b.raw?normalize(b.raw):null;
-      if(!confirm('Sostituire i dati attuali con '+l.length+' allenamenti?'))return;
-      log=l;S('gt_log',log);if(n){raw=b.raw;sc=n;S('gt_raw',raw)}dropDraft();toast('Backup ripristinato');menu()});break;
-    case'sch':pick('.json,.jsx,.js,.txt',t=>{
-      t=t.trim();let r;
-      if(t[0]==='{')r=JSON.parse(t);
-      else{const m=t.match(/const\s+data\s*=\s*(\{[\s\S]*?\n\});?/);if(!m)throw Error('struttura non riconosciuta');r=new Function('return '+m[1])()}
-      const n=normalize(r);
-      if(draft&&!confirm('Hai un allenamento in corso: verrà scartato. Continuare?'))return;
-      dropDraft();raw=r;sc=n;S('gt_raw',raw);toast('Scheda importata: '+n.sessions.length+' sessioni');menu()});break;
-    case'def':if(confirm('Tornare alla scheda originale? Lo storico resta.')){localStorage.removeItem('gt_raw');dropDraft();location.reload()}break;
-    case'inst':deferred.prompt();deferred=null;menu();break;
-  }
-});
-app.addEventListener('input',e=>{const r=row(e.target);if(!r)return;r.x[e.target.dataset.f]=e.target.value;S('gt_draft',draft)});
-
-/* ---- routing (l'indietro di Android funziona via hash) ---- */
-const pos={};
-addEventListener('scroll',()=>{pos[location.hash]=scrollY},{passive:true});
-function route(){
-  clearInterval(tick);
-  const y=pos[location.hash]||0,[,a,b]=location.hash.split('/');
-  if(a==='w')workout(decodeURIComponent(b));
-  else if(a==='h')hist(decodeURIComponent(b));
-  else if(a==='sci')sci();
-  else if(a==='menu')menu();
-  else home();
-  scrollTo(0,y);
-}
-addEventListener('hashchange',route);
-addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e});
-if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
-(async()=>{
-  if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
-  try{raw=L('gt_raw',null)||await(await fetch('scheda.json')).json();sc=normalize(raw)}
-  catch(e){app.innerHTML='<p>Impossibile caricare la scheda: '+esc(e.message)+'</p>';return}
-  log.sort((x,y)=>String(y.date).localeCompare(String(x.date)));
-  route();
-})();
-</script>
+<script src="vendor/chart.umd.min.js" defer></script>
+<script src="analytics.js" defer></script>
+<script src="app.js" defer></script>
 </body>
 </html>
